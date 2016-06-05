@@ -73,7 +73,7 @@ type ConsumerGroup struct {
 	wg             sync.WaitGroup
 	singleShutdown sync.Once
 
-	messages chan *sarama.ConsumerMessage
+	messages map[string]chan *sarama.ConsumerMessage
 	errors   chan *sarama.ConsumerError
 	stopper  chan struct{}
 
@@ -144,10 +144,15 @@ func JoinConsumerGroup(name string, topics []string, zookeeper []string, config 
 		group:    group,
 		instance: instance,
 
-		messages: make(chan *sarama.ConsumerMessage, config.ChannelBufferSize),
+		messages: make(map[string] chan *sarama.ConsumerMessage), //make(chan *sarama.ConsumerMessage, config.ChannelBufferSize),
 		errors:   make(chan *sarama.ConsumerError, config.ChannelBufferSize),
 		stopper:  make(chan struct{}),
 	}
+
+	for _,topic:=range topics{
+		cg.messages[topic]=make(chan *sarama.ConsumerMessage, cg.config.ChannelBufferSize)
+	}
+
 
 	// Register consumer group
 	if exists, err := cg.group.Exists(); err != nil {
@@ -182,8 +187,8 @@ func JoinConsumerGroup(name string, topics []string, zookeeper []string, config 
 }
 
 // Returns a channel that you can read to obtain events from Kafka to process.
-func (cg *ConsumerGroup) Messages() <-chan *sarama.ConsumerMessage {
-	return cg.messages
+func (cg *ConsumerGroup) Messages(topic string) <-chan *sarama.ConsumerMessage {
+	return cg.messages[topic]
 }
 
 // Returns a channel that you can read to obtain events from Kafka to process.
@@ -219,7 +224,9 @@ func (cg *ConsumerGroup) Close() error {
 			cg.Logf("FAILED closing the Sarama client: %s\n", shutdownError)
 		}
 
-		close(cg.messages)
+		for _,message :=range cg.messages {
+			close(message)
+		}
 		close(cg.errors)
 		cg.instance = nil
 	})
@@ -267,7 +274,10 @@ func (cg *ConsumerGroup) topicListConsumer(topics []string) {
 
 		for _, topic := range topics {
 			cg.wg.Add(1)
-			go cg.topicConsumer(topic, cg.messages, cg.errors, stopper)
+			//if cg.messages[topic]==nil {
+				
+			//}
+			go cg.topicConsumer(topic, cg.messages[topic], cg.errors, stopper)
 		}
 
 		select {
